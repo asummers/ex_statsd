@@ -213,6 +213,55 @@ defmodule ExStatsD do
     end
   end
 
+  def event(title, text, opts \\ default_options()) do
+    event_string = format_event(title, text, opts)
+
+    if byte_size(event_string) > 8 * 1024 do
+      require Logger
+      Logger.warn "Event #{title} payload is too big (more that 8KB), event will be discarded"
+    end
+
+    transmit(event_string, [])
+  end
+
+  defp format_event(title, text, opts) do
+    title = escape_event_content(title)
+    text  = escape_event_content(text)
+
+    add_opts("_e{#{String.length(title)},#{String.length(text)}}:#{title}|#{text}", opts)
+  end
+
+  defp add_opts(event, opts) do
+    available_opts = %{
+      date_happened: "t",
+      hostname: "h",
+      aggregation_key: "k",
+      priority: "p",
+      source_type_name: "s",
+      alert_type: "t"
+    }
+
+    opts
+    |> Enum.filter(fn {key, _opt} -> Map.has_key?(available_opts, key) end)
+    |> Enum.reduce(event, fn {key, opt} ->
+      type = available_opts[key]
+      opt = strip_pipes(opt)
+      "#{event}|#{type}:#{opt}"
+    end)
+    |> add_tags(opts[:tags])
+  end
+
+  defp add_tags(event, nil), do: event
+  defp add_tags(event, []), do: event
+  defp add_tags(event, tags) do
+    tags = Enum.map_join(tags, ",", &strip_pipes/1)
+
+    "#{event}|##{tags}"
+  end
+
+  defp escape_event_content(msg), do: String.replace(msg, "\n", "\\n")
+  defp strip_pipes(opt), do: String.replace(opt, "|", "")
+
   @doc """
   Record a histogram value (DogStatsD-only).
 
@@ -274,8 +323,7 @@ defmodule ExStatsD do
     end
   end
 
-  defp transmit(message, options), do: transmit(message, options, 1)
-  defp transmit(message, options, sample_rate) do
+  defp transmit(message, options, sample_rate \\ 1) do
     name = Keyword.get(options, :name, __MODULE__)
     GenServer.cast(name, {:transmit, message, options, sample_rate})
   end
@@ -308,6 +356,14 @@ defmodule ExStatsD do
     tags = Keyword.get(options, :tags, [])
     pkt = message |> packet(state.namespace, tags, sample_rate)
     {:noreply, %{state | sink: [pkt | sink]}}
+  end
+
+  @doc false
+  def handle_cast({:transmit, message, _options, sample_rate}, state) when is_binary(message) do
+    {:ok, socket} = :gen_udp.open(0, [:binary])
+    :gen_udp.send(socket, state.host, state.port, message)
+    :gen_udp.close(socket)
+    {:noreply, state}
   end
 
   @doc false
