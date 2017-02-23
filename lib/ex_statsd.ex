@@ -248,7 +248,7 @@ defmodule ExStatsD do
       opt = strip_pipes(opt)
       "#{event}|#{type}:#{opt}"
     end)
-    |> add_tags(opts[:tags])
+    |> add_tags(Keyword.get(:tags))
   end
 
   defp add_tags(event, nil), do: event
