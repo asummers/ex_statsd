@@ -213,17 +213,18 @@ defmodule ExStatsD do
     end
   end
 
+  # require Logger
   def event(title, text, opts \\ default_options()) do
     event_string = format_event(title, text, opts)
 
     if byte_size(event_string) > 8 * 1024 do
-      require Logger
-      Logger.warn "Event #{title} payload is too big (more that 8KB), event will be discarded"
+      # Logger.warn("Event #{title} payload is too big (more that 8KB), event will be discarded")
     end
 
     transmit(event_string, [])
   end
 
+  @spec add_opts(String.t, Keyword.t) :: String.t
   defp format_event(title, text, opts) do
     title = escape_event_content(title)
     text  = escape_event_content(text)
@@ -243,12 +244,13 @@ defmodule ExStatsD do
 
     opts
     |> Enum.filter(fn {key, _opt} -> Map.has_key?(available_opts, key) end)
-    |> Enum.reduce(event, fn {key, opt} ->
+    |> IO.inspect
+    |> Enum.reduce(event, fn {key, opt}, event ->
       type = available_opts[key]
       opt = strip_pipes(opt)
       "#{event}|#{type}:#{opt}"
     end)
-    |> add_tags(Keyword.get(:tags))
+    |> add_tags(Keyword.get(opts, :tags))
   end
 
   defp add_tags(event, nil), do: event
@@ -359,7 +361,7 @@ defmodule ExStatsD do
   end
 
   @doc false
-  def handle_cast({:transmit, message, _options, sample_rate}, state) when is_binary(message) do
+  def handle_cast({:transmit, message, _options, _sample_rate}, state) when is_binary(message) do
     {:ok, socket} = :gen_udp.open(0, [:binary])
     :gen_udp.send(socket, state.host, state.port, message)
     :gen_udp.close(socket)
